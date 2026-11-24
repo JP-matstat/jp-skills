@@ -1,116 +1,50 @@
-# split-test-impl
+# jp-skills
 
-Develop a slice from a spec with two isolated agents: one writes the tests, a
-second implements the spec without ever seeing them.
+Agent skills I use. Each one is a plain `SKILL.md` folder with an optional
+`scripts/` directory, so it works in any coding agent that reads a skills folder
+(Pi, Claude Code, OpenCode, anything else with the same convention).
 
-A spec written, implemented and checked by one mind is self-confirming. This
-skill splits the work so the two halves cannot flatter each other. The test
-worker turns the spec into a suite and freezes it. The implementation worker gets
-a fresh session, the spec, and an empty worktree — no test names, no assertions,
-no hint of how many tests exist or what they check.
-
-If the two disagree, something is wrong: the spec is vague, or a test over-specifies
-it. Either way you find out before the code is written, which is the cheapest
-moment to find out.
-
-## What it enforces
-
-The blindness is mechanical, not a matter of good intentions.
-
-- **Two private repositories.** The tests live in a vault that the main repo
-  never holds a ref to; the implementation gets its own worktree seeded from the
-  pre-test base commit. They share no object store, so neither can read the
-  other with a single `git` command.
-- **Counts-only feedback.** `check` parses the JUnit XML and prints
-  `passed=14 failed=2 errors=0 skipped=0 total=16`. Test names and tracebacks
-  require an explicit, counted `reveal` — and only two are allowed.
-- **Content-based leak detection.** A frozen test copied into the implementation
-  worktree is caught by blob hash, not by filename.
-- **The suite must actually run.** A `conftest.py` that ignores the slice's
-  directory, or a suite that skips itself, is refused rather than reported green.
-- **The spec is pinned at freeze.** Rewriting the spec after the tests were
-  written against it makes every later command refuse until the slice is
-  re-opened under a new name.
-
-## What you don't get
-
-Proof of correctness. You get proof that *some* implementation satisfies the spec
-as written — which is a statement about the spec's implementability, not its
-rightness. Worth saying out loud to the implementation worker, so it doesn't
-optimise for a test suite it cannot see.
+| Skill | What it does | Invoke |
+|---|---|---|
+| [split-test-impl](skills/split-test-impl/) | Develop a slice from a spec with two isolated agents: one writes the tests and freezes them, a second implements from the spec alone and never sees the suite. Blindness is enforced by two private repositories, not by good intentions. | `/split-test-impl`, or the skill itself |
+| [nownow](skills/nownow/) | Keep the work moving: decide reversible things yourself, track the decisions and their rationale, stop only for what is destructive, externally consequential or materially out of scope. Report the decisions at the end. | `/nownow`, "nownow" |
+| [finizh](skills/finizh/) | Audit whether the session's requested work is complete. If not, list what remains, or write one handoff per remaining task; if complete, commit and push. `finizh ho s` starts one fresh agent per handoff in its own clone and tab. | `/finizh`, `/finizh ho`, `/finizh ho s` |
 
 ## Install
 
-Copy the skill directory into your agent's skills folder:
-
-```
-.agents/skills/split-test-impl/     # or wherever your agent looks
-```
-
-The harness is plain bash plus two small Python helpers. It needs `git`, `rsync`,
-and `pytest` on the target project's interpreter.
-
-## Use
-
-Requires `git`, `rsync`, `pytest`, and Python 3.11+. Run `sti.sh` as the user who
-owns the repository — it creates repositories, worktrees and refs, and files
-created by the wrong user lock the owner out.
-
-Write a spec first, with a public contract and numbered requirements:
-
-```markdown
-# Basket
-
-## Public contract
-
-`demo/basket.py`
-
-- `line_total(unit_price: int, qty: int) -> int`
-- `basket_total(lines: list[tuple[int, int]]) -> int`
-
-## Requirements
-
-### R1 - line_total multiplies unit price by quantity
-### R2 - basket_total sums the line totals
-### R3 - basket_total of an empty list is 0
-```
-
-Then:
+Copy the skills you want into your agent's skills folder:
 
 ```bash
-STI=.agents/skills/split-test-impl/scripts/sti.sh
-
-$STI open basket specs/basket.md   # private test vault at HEAD
-                                    # -> hand the spec + vault to the test worker
-$STI freeze basket                 # tests immutable, spec text pinned
-$STI audit basket                  # every test cites a requirement, and vice versa
-$STI impl basket                   # private worktree at the pre-test base commit
-                                    # -> hand the spec + worktree to the impl worker
-$STI check basket                  # counts only
-$STI finish basket                 # audit + green + committed gates, prints the merge
+git clone https://github.com/JP-matstat/jp-skills /tmp/jp-skills
+mkdir -p .agents/skills
+cp -r /tmp/jp-skills/skills/* .agents/skills/     # or just the ones you want
 ```
 
-Each step is a separate agent session. `[SKILL.md](SKILL.md)` has the workflow and
-the prompt templates for both workers; `[REFERENCE.md](REFERENCE.md)` covers the
-leak channels and the escalation policy.
-
-## Developing the harness
-
-`scripts/sti_test.sh` is the harness's own test suite: 71 assertions over whole
-slices run end to end in throwaway repositories under `$TMPDIR`, including
-attempts to defeat the blindness.
+Or keep one checkout and link them, so `git pull` updates them all:
 
 ```bash
-bash scripts/sti_test.sh
+ln -s /path/to/jp-skills/skills/nownow .agents/skills/nownow
 ```
 
-If it goes red, the skill's promises are broken — that is the signal to act on,
-not a flaky test to re-run.
+Claude Code reads `~/.claude/skills/` (and `.claude/skills/` in a project);
+OpenCode and Pi read `.agents/skills/` (or their configured skills directory).
 
-## When it pays off
+## Layout
 
-Roughly twice the tokens of writing tests and implementation in one session,
-plus a review pass on the spec. Worth it when the slice is big enough that
-"looks right" is a real risk: a new domain package, pricing or forecasting logic,
-anything with a public API others will depend on. Overkill for a bug fix with an
-obvious fix.
+```
+skills/
+├── split-test-impl/     SKILL.md, REFERENCE.md, scripts/sti.sh, its own tests
+├── nownow/              SKILL.md
+└── finizh/              SKILL.md, scripts/spawn-agents.sh
+```
+
+Each `SKILL.md` is self-contained and names its own scripts as
+`<this skill's directory>/scripts/...`, so a skill can be copied out of this
+repository on its own. `finizh ho s` also expects the surrounding project to
+provide `scripts/session.sh new <id>` (the disposable-clone convention); it finds
+the project root from the skill's own location, and `LOGISTIK_CANONICAL` /
+`LOGISTIK_SESSIONS_DIR` override that.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
